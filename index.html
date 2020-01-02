@@ -1,0 +1,174 @@
+<html>
+<head>
+        <!-- current angularjs (not for long though I'm sure)  -->
+    	<script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.7.8/angular.js"></script>
+        <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.7.8/angular-route.min.js"></script>
+
+        <!--americasmart styling -->
+        <link rel="stylesheet" type="text/css" href="https://www.americasmart.com/hubfs/www/includes/css/styles.css">
+
+  <style>
+  	select {
+  		float: left;
+  		padding: 0.5em;
+  	}
+  </style>
+</head>
+<body ng-app="helperApp" ng-controller="helperController as vm">
+	<div class="grid-wrapper">
+		<div class="grid-container align-center margin-four">
+
+			<select class="column four" ng-model="vm.buildingSelect" name="buildingSelect" id="buildingSelect" ng-change="vm.selectFloors()">
+				<option ng-repeat="building in vm.buildings" value="//building.id//">
+					Building //building.id//
+				</option>
+			</select>
+			<select class="column four" ng-model="vm.floorSelect" name="floorSelect" id="floorSelect" ng-change="vm.selectFloor()">
+				<option ng-repeat="floor in vm.floors | orderBy:'-'" value="//floor.level//">
+					Floor //floor.level//
+				</option>
+			</select>
+		</div>
+		<div class="grid-container margin-four">
+			<h3>Link to WEM MeridianID</h3>
+			<a href="" class="align-center bttn fill gray size-300" ng-click="vm.openAll()">Open All</a>
+			<h4>Clicked links copy the booth ID into the clipboard and open WEM page to enter it as the Meridian ID.</h4>
+			<ul>
+				<li ng-repeat="showroom in vm.showrooms.booths track by showroom.boothID" class="font-size-14" ng-click="vm.copyTitle(showroom.title)">
+					<a ng-if="showroom.exhibitors.length > 0" ng-href="//showroom.meid//" target="_blank"><span id="//showroom.title//">//showroom.title//</span> : //showroom.exhibitors[0].exhibName//</a>
+				</li>
+			</ul>
+		</div>
+    </div>
+<script>
+directoryApp = angular.module("helperApp", ['ngRoute'])
+
+//-----------------------------------------------------------------------//
+// change scope templating string to insert angular stuff from ${} to    //
+//       without this hubspot will not play nice with angular            //
+//-----------------------------------------------------------------------//
+.config(['$interpolateProvider', function($interpolateProvider) {
+	$interpolateProvider.startSymbol('//');
+	$interpolateProvider.endSymbol('//');
+}])
+//-------------------------------------------------------------------//
+
+//----------------------------------//
+//  service to get http requests    //
+//----------------------------------//
+.service('getRequest', ['$http', function($http) {
+	var getData = function(request, parms={}) {
+		return $http.get(request, {params: parms, cache: 'true' }).then(function(response) {
+			return response.data;
+		});
+	};
+	return {
+		getData: getData
+	};
+}])
+//----------------------------------//
+
+
+//-----------------------------------------------------------------------//
+//      controller to sends AJAX request and returns it to the view      //
+//-----------------------------------------------------------------------//
+.controller("helperController", ['$scope', 'getRequest', function directoryController($scope, getRequest) {
+
+	var vm = this;
+
+	vm.getShowrooms = function() {
+		getRequest.getData("https://wem.americasmart.com//api/v1.2/FloorPlan?building=" + vm.buildingSelect + "&floorNum=" + vm.floorSelect).then(function(showrooms) {
+				console.log(showrooms);
+				showrooms[0].booths = showrooms[0].booths.map(function(showroom) {
+					if (showroom.exhibitors.length > 0) {
+						showroom.meid = 'https://wem.americasmart.com/V50/admin/exhibits/exhibitorList/meridian/#!/?exhibitorID=' + showroom.exhibitors[0].exhibID
+						showroom.title = vm.buildingSelect + "-" + vm.floorSelect + "-" + showroom.bthTitle;
+					}
+					return showroom;
+				});
+				vm.showrooms = showrooms[0];
+				console.log(vm.showrooms);
+			}
+		);
+	}
+	
+	// select floors from building
+	vm.selectFloors = function() {
+		vm.buildings.forEach(function(building) {
+			if (building.id == vm.buildingSelect) {
+				console.log("adding floors", building.floors);
+				vm.floors = building.floors;
+				vm.selectFloor();
+			}
+		});
+	}
+	vm.selectFloor = function() {
+		vm.floors.forEach(function(floor) {
+			if (floor.level == vm.floorSelect) {
+				vm.floor = floor;
+				vm.getShowrooms();
+			}
+		});
+	}
+
+	vm.copyTitle = function(title) {
+		const el = document.createElement('textarea');
+		el.value = title;
+		document.body.appendChild(el);
+		el.select();
+		document.execCommand('copy');
+		document.body.removeChild(el);
+	}
+
+	vm.openAll = function() {
+		console.log("opening all");
+		vm.showrooms.booths.forEach(function(showroom, sindex) {
+			if (showroom.exhibitors.length > 0) {
+			let link     = document.createElement('a');
+			link.href    = showroom.meid;
+			link.target  = '_blank';
+			link.click();
+			}
+		});
+	}
+
+	vm.floors = null;
+
+	// get floor information from WEM database
+	getRequest.getData("https://edit.meridianapps.com/api/locations/6334295885479936/maps?format=json").then(function(maplist) {
+		var buildings = {};
+
+		maplist.results.forEach(function(map) {
+			if (!(map.group_name in buildings)) {
+				buildings[map.group_name] = {
+					floors: [map],
+				};
+			}
+			else {
+				buildings[map.group_name].floors.push(map);
+			}
+		});
+
+		buildings = Object.keys(buildings).map(function(build) {
+			var building = buildings[build];
+			building.id  = parseFloat(build.split(" ")[1]);
+			building.floors = buildings[build].floors.sort(function(a, b){
+				return (a.level > b.level) ? 1 : -1;
+			});
+			return building;
+		}).sort(function(a, b) {
+			return (a.id > b.id) ? 1 : -1;
+		});
+
+		vm.buildings = buildings;
+		vm.floormap = maplist.results[0];
+		vm.buildingSelect = "1";
+		vm.floorSelect = "1";
+		vm.selectFloors();
+	});
+}]);
+//-----------------------------------------------------------------------//
+</script>
+
+</body>
+</html>
